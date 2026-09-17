@@ -21,7 +21,7 @@
 
 ## 项目简介
 
-WorkBuddy2API 是一个自托管的 **OpenAI 兼容上游网关**，将 ```CodeBuddy``` 账号包装为统一的 `/v1/chat/completions` 服务。
+WorkBuddy2API 是一个自托管的 **OpenAI 兼容上游网关**，将 ```CodeBuddy``` 账号包装为统一的 `/v1/chat/completions` 服务，并提供 `/v1/responses`（OpenAI Responses 协议）端点——Codex CLI 已硬移除 chat wire_api，只能经该端点接入。
 
 ### 本项目做什么
 
@@ -31,7 +31,7 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容上游网关**，将 ```CodeB
 
 ### 本项目不做什么
 
-- **只做上游网关，不做下游协议转换** — 本项目仅负责对接上游 ```CodeBuddy``` 并暴露 OpenAI Chat 协议；Anthropic Messages、Gemini 等其他协议的适配应由下游网关负责；
+- **只做上游网关，不做下游协议转换** — 本项目仅负责对接上游 ```CodeBuddy``` 并暴露 OpenAI 协议（Chat Completions + Responses）；Anthropic Messages、Gemini 等其他协议的适配应由下游网关负责；
 - **不内嵌 Web 管理面板** — 网关核心保持精简，可视化面板作为独立项目维护，数据直取上游接口，不增加网关适配负担。
 
 ### 社区前端面板
@@ -65,6 +65,7 @@ WorkBuddy2API 是一个自托管的 **OpenAI 兼容上游网关**，将 ```CodeB
 ### 请求链路
 
 - **流式 + 非流式** — 出站强制 `stream:true`；SSE 帧按 OpenAI 规范白名单重建；非流式由本地聚合为单响应
+- **Responses 协议端点**（`POST /v1/responses`） — 面向 Codex CLI 的协议翻译层：请求侧把 `instructions` / `input`（string 或 items 数组）/ 扁平 `tools` / `reasoning.effort` 翻译为 chat body（`metadata.conversation` 映射为粘性键），复用与 chat 完全相同的选号轮转 / 熔断 / 冷却 / 成本账本管线；响应侧把上游 chat SSE 流翻译为 Responses 事件流（`response.created` → item added/done 配对 → `response.completed`，`usage` 映射为 `input_tokens` / `output_tokens`），非流式（`stream:false`）聚合为单个 Responses 对象
 - **DeepSeek 思维链注入** — 出站请求体注入 `thinking.type=enabled` + 默认档位，`reasoning_content` 多轮回填，`reasoning_effort` 按模型档位自动降级
 - **系统提示词三模式**（`prompt.mode`，缺省 `passthrough`） —
   - `passthrough`（缺省）：透传客户端原始 system，遇内容拦截自动降级中性提示词重试
@@ -211,6 +212,12 @@ curl -s http://localhost:7863/v1/chat/completions \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}],"stream":false}'
+
+# Responses 协议（Codex CLI 端点；流式事件流）
+curl -sN http://localhost:7863/v1/responses \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-flash","input":"hi","stream":true}'
 ```
 
 ## 安全与合规

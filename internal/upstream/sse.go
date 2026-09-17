@@ -267,6 +267,14 @@ func Aggregate(r io.Reader) (map[string]any, error) {
 	return resp, nil
 }
 
+// EnsureUsageTotal 是 ensureUsageTotal 的导出面：usage 缺 total_tokens 但
+// prompt_tokens/completion_tokens 都在时补齐 total = prompt + completion
+// （通过新 map 合并，不修改原上游 map）。任一缺失或已有 total 时原样返回。
+// 导出原因：/v1/responses 翻译层（server 包）的流式 completed 与非流式响应
+// 需要同一兜底——Codex 的 ResponseCompletedUsage 中 total_tokens 是必填字段，
+// 缺失即整轮解析失败，不能只靠 chat 非流式路径的单点兜底。
+func EnsureUsageTotal(u map[string]any) map[string]any { return ensureUsageTotal(u) }
+
 // ensureUsageTotal 在 usage 缺 total_tokens 但 prompt_tokens/completion_tokens 都在时
 // 补齐 total = prompt + completion（通过新 map 合并，不修改原上游 map）。
 // 任一缺失或已有 total 时原样返回。

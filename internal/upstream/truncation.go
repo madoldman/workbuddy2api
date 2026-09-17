@@ -14,6 +14,11 @@ import (
 	"strings"
 )
 
+// IsTruncatedArguments 是 isTruncatedArguments 的导出面，供 /v1/responses 流式
+// 翻译层（server 包）在收口 tool call 时做同一截断判定——导出而非复制，保证
+// 「残缺参数不下发」的口径全库单一来源（chat 非流式 dropTruncatedToolCalls 同源）。
+func IsTruncatedArguments(raw string) bool { return isTruncatedArguments(raw) }
+
 // isTruncatedArguments 判定工具参数字符串是否因分片丢失而残缺（区别于「该工具本就无参数」）。
 //   - 空串 / 纯空白 → false（合法无参工具）；
 //   - 非空但 JSON 解析失败 → true（截断）；
