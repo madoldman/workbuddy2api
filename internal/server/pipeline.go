@@ -95,6 +95,15 @@ func (s chatPipeSink) onStreamSuccess(w http.ResponseWriter, h *Handler, acct *a
 	if hasUsage {
 		st.toks = toks
 	}
+	// metrics 采集：token 三段 + 缓存三段 + 真实扣费（供 /v1/stats）。
+	// 与成本账本同源同口径（都读末帧 usage），故此处一并带出，避免二次解析。
+	st.hasUsage = hasUsage
+	st.prompt = stats.PromptTokens()
+	st.cacheHit, st.cacheMiss, st.cacheWr = stats.CacheTokens()
+	if credit, ok := stats.Credit(); ok {
+		st.credit = credit
+		st.hasCredit = true
+	}
 	// 成本账本：末帧 usage 带 credit 与 token 总数时记录实测单价，
 	// 供下次选号把免费/便宜的号排在前面。
 	if credit, ok := stats.Credit(); ok {
@@ -130,6 +139,8 @@ func (s chatPipeSink) onSyncSuccess(w http.ResponseWriter, h *Handler, acct *aut
 	if credit, total, ok := usageCreditTotal(resp); ok {
 		h.cfg.Pool.NoteModelCost(acct.UID, bareModel, credit, total)
 	}
+	// metrics 采集（非流式）：与流式同口径，从同一份 usage 带出。
+	fillStatFromUsage(st, resp)
 }
 
 // runChatPipeline 共享轮转骨架。从原 chatCompletions 内联代码提取（注释保留原样），

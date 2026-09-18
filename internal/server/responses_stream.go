@@ -734,6 +734,15 @@ func (s responsesPipeSink) onStreamSuccess(w http.ResponseWriter, h *Handler, ac
 	if hasUsage {
 		st.toks = toks
 	}
+	// metrics 采集：token 三段 + 缓存三段 + 真实扣费（供 /v1/stats）。
+	// 与 chat 流式路径同口径（都读末帧 usage），responses 流量同样计入聚合。
+	st.hasUsage = hasUsage
+	st.prompt = stats.PromptTokens()
+	st.cacheHit, st.cacheMiss, st.cacheWr = stats.CacheTokens()
+	if credit, ok := stats.Credit(); ok {
+		st.credit = credit
+		st.hasCredit = true
+	}
 	// 成本账本：末帧 usage 带 credit 时记实测单价（与 chat 完全同语义）。
 	if credit, ok := stats.Credit(); ok {
 		h.cfg.Pool.NoteModelCost(acct.UID, bareModel, credit, stats.TotalTokens())

@@ -663,6 +663,8 @@ func (s responsesPipeSink) onSyncSuccess(w http.ResponseWriter, h *Handler, acct
 		if credit, total, ok := usageCreditTotal(resp); ok {
 			h.cfg.Pool.NoteModelCost(acct.UID, bareModel, credit, total)
 		}
+		// metrics 采集（非流式）：与流式同口径，从同一份 usage 带出（供 /v1/stats）。
+		fillStatFromUsage(st, resp)
 	}
 }
 

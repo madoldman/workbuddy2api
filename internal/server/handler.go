@@ -99,6 +99,8 @@ func NewHandler(cfg Config) *Handler {
 	h.mux.HandleFunc("POST /v1/responses", h.withAuth(h.responses))
 	h.mux.HandleFunc("GET /v1/models", h.withAuth(h.models))
 	h.mux.HandleFunc("GET /status", h.withAuth(h.status))
+	h.mux.HandleFunc("GET /v1/stats", h.withAuth(h.stats))
+	h.mux.HandleFunc("POST /v1/stats/reset", h.withAuth(h.statsReset))
 	h.mux.HandleFunc("GET /healthz", h.healthz)
 	return h
 }
