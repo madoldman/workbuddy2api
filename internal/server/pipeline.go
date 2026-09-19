@@ -166,15 +166,24 @@ func (h *Handler) runChatPipeline(r *http.Request, body []byte, peekModel, bareM
 	// 提取与下方会话头族的聚合键共用同一结果，故**不受粘性开关影响**：粘性未启用
 	// （Session==nil）时聚合键仍应是会话级，而不是退化成轮级。
 	sessKey := session.ExtractKey(body)
+	// stickyKey 是**粘性专用**键，与 sessKey（会话头族聚合用）分开：
+	// sessKey 为空时（OpenAI 兼容客户端——dsh / Codex 等既无 conversationId 也无
+	// metadata）用首条 user 消息派生会话级 fallback 键，使粘性仍能生效。
+	// 不能直接改 sessKey：那会连带改变上游头族 RequestIDForKey 的聚合语义
+	// （会话级 vs 轮级兜底），属于另一条链路的契约。
+	stickyKey := sessKey
+	if stickyKey == "" {
+		stickyKey = session.StickyFallbackKey(body)
+	}
 	stickyUID := ""
-	if h.cfg.Session != nil && sessKey != "" {
+	if h.cfg.Session != nil && stickyKey != "" {
 		// 传给 ResolveForModel 的是**完整**模型名（peek.Model，含 realm 前缀）。
 		// 粘性命中校验走 injected AvailableForModel 闭包 → 闭包内部 resolveModel 剥前缀
 		// 得 realm+bare，再按 realm 过滤可用集合。若传已剥前缀的 bareModel，闭包对裸名
 		// 恒剥出 realm=cn，跨 realm 粘性会话会被错误钉回 CN 集合；完整前缀才能让
 		// 闭包正确过滤到 global 集合（见 cmd/server/wiring.go realmAwareAvailableForModel）。
 		// 模型名也参与成本账本与选号过滤，不能用 "-" 占位污染模型键。
-		if uid, ok := h.cfg.Session.ResolveForModel(sessKey, peekModel); ok {
+		if uid, ok := h.cfg.Session.ResolveForModel(stickyKey, peekModel); ok {
 			stickyUID = uid
 		}
 	}
@@ -206,7 +215,7 @@ func (h *Handler) runChatPipeline(r *http.Request, body []byte, peekModel, bareM
 	// 幂等：stickyUID 已空则空操作；不会误解绑其他轮的绑定。仅当 Session != nil 时 stickyUID 才会非空。
 	unbindSticky := func() {
 		if stickyUID != "" {
-			h.cfg.Session.Unbind(sessKey)
+			h.cfg.Session.Unbind(stickyKey)
 			stickyUID = ""
 		}
 	}
@@ -242,11 +251,14 @@ func (h *Handler) runChatPipeline(r *http.Request, body []byte, peekModel, bareM
 		body = rewriteModel(body, bareModel)
 	}
 
-	// 会话头族（issue #35）：后台按 X-Conversation-Request-ID（对话轮级）聚合请求，
-	// 官方客户端一次 user send 内所有 tool call/重试/换号复用同一个 ID。此处**轮转
-	// 循环外**生成一次，循环内每次出站原样复用 → 换号/重试/降级全部同 ID，后台不再
-	// 碎片化（此前网关一个都不发，上游按 HTTP 请求逐条记账，同一对话几十上百个
-	// RequestID）。
+	// 会话头族（issue #35）：后台按 X-Conversation-Request-ID 聚合请求，官方客户端
+	// 一次 user send 内所有 tool call/重试/换号复用同一个 ID。**双形态并存**（均对齐
+	// 官方）：带 conversationId 的客户端为**会话级**（对齐官方云链路 lfConvReqId 的
+	// 服务端下发后复用形态，跨轮同键）；无会话键的客户端为**轮级**（对齐官方桌面
+	// CLI / 排队链路的 queueRequestId 形态，同轮内复用、换 user 消息换键）。此处
+	// **轮转循环外**生成一次，循环内每次出站原样复用 → 换号/重试/降级全部同 ID，
+	// 后台不再碎片化（此前网关一个都不发，上游按 HTTP 请求逐条记账，同一对话几十
+	// 上百个 RequestID）。
 	//   - conversationID：body 提取（透传客户端原值，缺省空串——不伪造，见
 	//     ResolveConversationID；官方后台不校验一致，空会话则不建立聚合键）；
 	//   - conversationRequestID：入站 X-Conversation-Request-ID 透传优先（客户端已
@@ -440,8 +452,8 @@ func (h *Handler) runChatPipeline(r *http.Request, body []byte, peekModel, bareM
 		h.cfg.Pool.BlockModelClear(acct.UID, bareModel)
 		// 粘性跟随最终成功号：本轮成功的账号成为该会话的粘性绑定（覆盖旧绑定）。
 		// 若 sticky 号失败、轮换到别的号成功，这里把会话重绑到新号，多轮对话下一跳不再随机抽。
-		if sessKey != "" && h.cfg.Session != nil {
-			h.cfg.Session.Bind(sessKey, acct.UID)
+		if stickyKey != "" && h.cfg.Session != nil {
+			h.cfg.Session.Bind(stickyKey, acct.UID)
 		}
 		if stream {
 			st.status = http.StatusOK
