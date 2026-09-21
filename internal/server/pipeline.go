@@ -451,6 +451,20 @@ func (h *Handler) runChatPipeline(r *http.Request, body []byte, peekModel, bareM
 				st.status = http.StatusBadRequest
 				return
 			}
+			// 图片格式/数据无效：立即透传上游原文回客户端，不罚号不轮转。
+			// 同一 body 换账号仍是同样的解析结果，轮转只会放大无效请求。
+			if kind == upstream.ErrImageInvalid {
+				h.applyErrorPolicy(acct.UID, kind, string(respBody), bareModel, uerr)
+				fail(acct.UID)
+				msg := string(respBody)
+				if strings.TrimSpace(msg) == "" {
+					msg = "image request was rejected by upstream"
+				}
+				sink.writeImmediateError(w, http.StatusBadRequest, "image_invalid", msg,
+					h.hintOf(upstream.ErrImageInvalid, string(respBody), bareModel, reqHasImage, uerr))
+				st.status = http.StatusBadRequest
+				return
+			}
 			// lastErr 携带完整 body（uerr.Msg 在 upstream 侧截断 200 字符，透传语义
 			// 5755fe3 要求原文全量）+ Kind/RetryAfter（末端映射与冷却时长共用）。
 			lastErr = &upstream.Error{Kind: kind, Status: status, Msg: string(respBody), RetryAfter: uerr.RetryAfter}
